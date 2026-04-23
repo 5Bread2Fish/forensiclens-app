@@ -3,10 +3,12 @@
    Consent | History | i18n | 3-Panel | GIF | B/A Slider
    =================================================== */
 
-// Auto-detect API endpoint: use env var (Vercel) or fall back to localhost
+// Auto-detect API endpoint
+// - localhost → Flask dev server on :5001
+// - Vercel/production → same-origin /api (proxied to Python serverless)
 const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
   ? 'http://localhost:5001/api'
-  : (window._FORENSICLENS_API || window.location.origin + '/api');
+  : (window.location.origin + '/api');
 
 let state = {
   file: null,
