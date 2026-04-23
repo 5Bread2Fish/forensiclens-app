@@ -13,3 +13,5 @@ node_modules/
 *.gif
 *.jpg~
 *.png~
+.vercel
+.env*.local
