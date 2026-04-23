@@ -3,7 +3,10 @@
    Consent | History | i18n | 3-Panel | GIF | B/A Slider
    =================================================== */
 
-const API_BASE = 'http://localhost:5001/api';
+// Auto-detect API endpoint: use env var (Vercel) or fall back to localhost
+const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ? 'http://localhost:5001/api'
+  : (window._FORENSICLENS_API || window.location.origin + '/api');
 
 let state = {
   file: null,
