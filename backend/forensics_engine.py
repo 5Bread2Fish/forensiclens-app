@@ -1,6 +1,7 @@
 """
 Image Forensics Engine
-Techniques: ELA, Noise Analysis, Copy-Move (SIFT), FFT Ghost Detection, EXIF Metadata
+Techniques: ELA, Noise, Copy-Move (SIFT+RANSAC), FFT Ghost, EXIF,
+            SRM, JPEG Block, Multi-ELA, Body Manipulation Detection
 """
 
 import cv2
@@ -15,6 +16,19 @@ import io
 import base64
 import os
 import tempfile
+
+# Body manipulation detector (lazy import to avoid circular deps)
+_body_detector = None
+def _get_body_detector():
+    global _body_detector
+    if _body_detector is None:
+        try:
+            import body_manipulation_detector as _body_detector
+        except ImportError:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(__file__))
+            import body_manipulation_detector as _body_detector
+    return _body_detector
 
 
 def pil_to_base64(img: Image.Image, fmt="PNG") -> str:
@@ -710,12 +724,21 @@ def run_full_analysis(image_bytes: bytes) -> dict:
     stretch   = stretch_distortion_analysis(img_pil)
     meta      = extract_metadata(img_pil, raw_bytes=image_bytes)
 
-    # New detectors
+    # Advanced detectors
     srm       = srm_residual_analysis(img_pil)
     jpeg_blk  = jpeg_block_analysis(img_pil)
     multi_ela = multi_quality_ela(img_pil)
 
-    overall   = compute_overall_score_v2(ela, noise, copy_move, fft, stretch, srm, jpeg_blk, multi_ela)
+    # Body manipulation detector (SNOW/FaceTune specific)
+    try:
+        bd = _get_body_detector()
+        body = bd.run_body_analysis(img_pil)
+    except Exception as e:
+        body = {'overall': {'score': 0.0, 'level': 'LOW', 'suspicious_zones': [],
+                            'manipulation_hints': f'분석 오류: {e}'}}
+
+    overall   = compute_overall_score_v2(ela, noise, copy_move, fft, stretch,
+                                        srm, jpeg_blk, multi_ela, body)
 
     # Composite overlay for three-panel comparison (middle panel)
     composite_b64 = build_composite_overlay(img_pil, ela, noise, stretch, copy_move, overall)
@@ -732,6 +755,7 @@ def run_full_analysis(image_bytes: bytes) -> dict:
         "srm":                   srm,
         "jpeg_block":            jpeg_blk,
         "multi_ela":             multi_ela,
+        "body_manipulation":     body,
         "metadata":              meta,
         "composite_overlay_b64": composite_b64,
         "image_size":            list(img_pil.size),
@@ -943,41 +967,44 @@ def multi_quality_ela(img_pil: Image.Image) -> dict:
 
 # ── Updated Overall Score (v2) ─────────────────────────────────────────────────
 def compute_overall_score_v2(
-    ela, noise, copy_move, fft, stretch, srm, jpeg_blk, multi_ela
+    ela, noise, copy_move, fft, stretch, srm, jpeg_blk, multi_ela, body=None
 ) -> dict:
     """
-    Updated scoring including new detectors.
+    Scoring with body manipulation detector integrated.
     Weights:
-      Multi-ELA  25%  (most reliable — multi-quality eliminates JPEG false positives)
-      SRM        20%  (camera noise fingerprint)
-      Noise      15%  (luminance-band corrected)
-      JPEG Block 15%  (quantization table inconsistency)
-      ELA        10%  (single-quality, lower weight now)
-      Copy-Move  10%  (RANSAC-verified, less false positives)
-      FFT         5%  (masked DCT, lower weight)
+      JPEG Block  35%  (most discriminating for splicing)
+      Multi-ELA   18%  (compression history)
+      SRM         18%  (camera noise fingerprint)
+      Body Warp   15%  (SNOW/FaceTune mesh warp, skin smooth)
+      Copy-Move    8%  (RANSAC-verified)
+      ELA          4%  (single-quality)
+      Noise        2%  (noisy on web images)
     """
     refs = SCIENTIFIC_REFS
 
     # Calibrated sub-scores
     mela_cal = min(multi_ela.get("score", 0) / 1.0, 1.0)
     srm_cal  = min(srm.get("score", 0) / 1.0, 1.0)
-    ns_cal   = min(noise.get("score", 0) / 0.8, 1.0)  # score is now excess above baseline
+    ns_cal   = min(noise.get("score", 0) / 0.8, 1.0)
     jb_cal   = min(jpeg_blk.get("score", 0) / 1.0, 1.0)
     ela_cal  = min(ela.get("score", 0) / 0.08, 1.0)
     cm_cal   = min(copy_move.get("score", 0) / 1.0, 1.0)
     fft_cal  = min(fft.get("score", 0) / 1.0, 1.0)
-    str_cal  = min(stretch.get("score", 0) / 0.4, 1.0)
 
-    # JPEG block inconsistency is most discriminating for splicing/heavy retouching
-    # Noise & FFT weight reduced (still saturated on web-compressed images)
+    # Body manipulation score
+    body_cal = 0.0
+    if body and isinstance(body, dict):
+        body_overall = body.get('overall', {})
+        body_cal = min(float(body_overall.get('score', 0.0)), 1.0)
+
     weighted = (
-        jb_cal   * 0.40 +   # strongest: 14x diff clean vs splice
-        mela_cal * 0.20 +   # multi-quality compression history
-        srm_cal  * 0.20 +   # camera noise fingerprint
-        cm_cal   * 0.10 +   # RANSAC copy-move
-        ela_cal  * 0.05 +   # single-quality ELA
-        ns_cal   * 0.03 +   # noisy on web images — low weight
-        fft_cal  * 0.02     # masked DCT — low weight
+        jb_cal   * 0.35 +
+        mela_cal * 0.18 +
+        srm_cal  * 0.18 +
+        body_cal * 0.15 +   # NEW: SNOW/FaceTune body warp detection
+        cm_cal   * 0.08 +
+        ela_cal  * 0.04 +
+        ns_cal   * 0.02
     )
 
     # Bayesian posterior with SNS prior = 35%
@@ -998,14 +1025,14 @@ def compute_overall_score_v2(
         "label": label,
         "color": color,
         "breakdown": {
-            "multi_ela":  round(mela_cal * 100, 1),
-            "srm":        round(srm_cal * 100, 1),
-            "noise":      round(ns_cal * 100, 1),
-            "jpeg_block": round(jb_cal * 100, 1),
-            "ela":        round(ela_cal * 100, 1),
-            "copy_move":  round(cm_cal * 100, 1),
-            "fft":        round(fft_cal * 100, 1),
+            "multi_ela":       round(mela_cal * 100, 1),
+            "srm":             round(srm_cal * 100, 1),
+            "noise":           round(ns_cal * 100, 1),
+            "jpeg_block":      round(jb_cal * 100, 1),
+            "ela":             round(ela_cal * 100, 1),
+            "copy_move":       round(cm_cal * 100, 1),
+            "fft":             round(fft_cal * 100, 1),
+            "body_warp":       round(body_cal * 100, 1),
         },
         "references": refs,
     }
-

@@ -457,10 +457,14 @@ function renderRestoration(rest) {
 
   const textCard = document.getElementById('analysisTextCard');
   const va = rest.vision_analysis || {};
+  const bm = va.body_manipulation_summary || '';
+  const ra = va.restoration_approach || '';
   textCard.innerHTML = `
     <h2>🤖 AI 심층 분석 보고서</h2>
     ${va.visual_analysis ? `<h3>👁 시각적 분석</h3><p>${va.visual_analysis}</p>` : ''}
     ${va.manipulation_details?.length ? `<h3>🔍 감지된 조작 상세</h3><ul>${va.manipulation_details.map(d => `<li>${d}</li>`).join('')}</ul>` : ''}
+    ${bm ? `<h3>🩻 신체 조작 요약</h3><p style="background:rgba(239,68,68,.08);padding:12px;border-radius:8px;border-left:3px solid #EF4444">${bm}</p>` : ''}
+    ${ra ? `<h3>🔄 복원 방법론</h3><p style="background:rgba(99,102,241,.08);padding:12px;border-radius:8px;border-left:3px solid var(--accent)">${ra}</p>` : ''}
     ${va.original_estimation ? `<h3>💡 원본 추정</h3><p>${va.original_estimation}</p>` : ''}
     ${va.confidence ? `<h3>신뢰도</h3><p><strong>${va.confidence.toUpperCase()}</strong></p>` : ''}
   `;
@@ -529,6 +533,51 @@ function renderTabs(f) {
   document.getElementById('stretchDesc').textContent = f.stretch?.description || '';
   document.getElementById('stretchHeatmap').src      = b64url(f.stretch?.heatmap_b64);
   document.getElementById('stretchOverlay').src      = b64url(f.stretch?.overlay_b64);
+
+  // Body Manipulation (SNOW/FaceTune)
+  const bd = f.body_manipulation || {};
+  const bdOverall = bd.overall || {};
+  const bodyTab = document.getElementById('tab-body');
+  if (bodyTab) {
+    const bdScore = (bdOverall.score || 0) * 100;
+    const bdLevel = bdScore > 60 ? 'HIGH' : bdScore > 30 ? 'MEDIUM' : 'LOW';
+    const bdColor = bdLevel === 'HIGH' ? '#EF4444' : bdLevel === 'MEDIUM' ? '#F59E0B' : '#10B981';
+    const zones = bdOverall.suspicious_zones || [];
+    const hints = bdOverall.manipulation_hints || '탐지된 신체 조작 없음';
+
+    const zoneCards = [
+      { key: 'gradient_warp', label: '🌀 Mesh Warp (Liquify)' },
+      { key: 'line_curvature', label: '📏 배경선 굴곡' },
+      { key: 'skin_texture', label: '✨ 피부 스무딩' },
+      { key: 'resampling', label: '🔁 리샘플링 아티팩트' },
+      { key: 'local_distortion', label: '🧩 국소 기하 왜곡' },
+    ];
+
+    bodyTab.innerHTML = `
+      <div class="panel-header">
+        <h3>🩻 신체 조작 탐지 (SNOW / FaceTune / BeautyPlus)</h3>
+        <div class="ref-pill">Mahdian & Saic IEEE TIFS 2008 · Kirchner & Fridrich SPIE 2010</div>
+        <p>허리·다리 슬리밍, 얼굴 소형화, 눈 확대, 피부 스무딩 등 모바일 뷰티 앱 조작을 탐지합니다.</p>
+      </div>
+      <div class="body-score-wrap">
+        <div class="body-score-bar" style="background:linear-gradient(90deg,${bdColor}88,${bdColor});width:${Math.min(bdScore,100)}%;height:8px;border-radius:4px;margin-bottom:12px"></div>
+        <div style="color:${bdColor};font-weight:700;font-size:18px">${bdScore.toFixed(0)}/100 <span style="font-size:13px;font-weight:400">${bdLevel}</span></div>
+      </div>
+      ${zones.length ? `<div class="body-zones">${zones.map(z => `<span class="region-chip">${z}</span>`).join('')}</div>` : ''}
+      <div class="body-hints" style="background:var(--bg3);border-radius:10px;padding:14px;margin:12px 0;font-size:13px;white-space:pre-wrap;color:var(--muted)">${hints}</div>
+      <div class="image-grid two-col">
+        ${bd.gradient_warp?.overlay_b64 ? `<div class="image-card"><div class="image-card-label">🌀 Warp 히트맵</div><img src="data:image/jpg;base64,${bd.gradient_warp.overlay_b64}" /></div>` : ''}
+        ${bd.local_distortion?.overlay_b64 ? `<div class="image-card"><div class="image-card-label">🧩 국소 왜곡 맵</div><img src="data:image/jpg;base64,${bd.local_distortion.overlay_b64}" /></div>` : ''}
+        ${bd.skin_texture?.heatmap_b64 ? `<div class="image-card"><div class="image-card-label">✨ 피부 스무딩 맵</div><img src="data:image/jpg;base64,${bd.skin_texture.heatmap_b64}" /></div>` : ''}
+      </div>
+      <div class="body-detail-table">${zoneCards.map(zc => {
+        const det = bd[zc.key] || {};
+        const s = ((det.score || 0)*100).toFixed(0);
+        const c = s > 60 ? '#EF4444' : s > 30 ? '#F59E0B' : '#10B981';
+        return `<div class="body-detail-row"><span>${zc.label}</span><span style="color:${c};font-weight:700">${s}/100</span><span style="color:var(--muted);font-size:12px">${det.description||''}</span></div>`;
+      }).join('')}</div>
+    `;
+  }
 
   // Metadata
   renderMeta(f.metadata);

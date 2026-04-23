@@ -145,7 +145,38 @@ def gemini_vision_analysis(img_pil: Image.Image, forensics_result: dict) -> dict
         copy_move_desc = forensics_result.get("copy_move", {}).get("description", "")
         meta_flags     = forensics_result.get("metadata", {}).get("suspicious_flags", [])
 
-        prompt = f"""당신은 디지털 포렌식 전문가입니다. 첨부된 이미지를 분석하고 반드시 JSON 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.
+        # Body manipulation hints
+        body_data = forensics_result.get("body_manipulation", {})
+        body_overall = body_data.get("overall", {})
+        body_score = body_overall.get("score", 0.0)
+        body_hints = body_overall.get("manipulation_hints", "")
+        body_zones = body_overall.get("suspicious_zones", [])
+
+        # Skin texture info
+        skin_score = body_data.get("skin_texture", {}).get("score", 0)
+        skin_desc = body_data.get("skin_texture", {}).get("description", "")
+
+        # Gradient warp info
+        warp_score = body_data.get("gradient_warp", {}).get("score", 0)
+        warp_desc = body_data.get("gradient_warp", {}).get("description", "")
+
+        # Build body-specific restoration instructions
+        body_restore_instructions = ""
+        if body_score > 0.2:
+            restore_parts = []
+            if "허리" in str(body_zones):
+                restore_parts.append("- 허리: 얇아진 허리를 자연스러운 체형에 맞게 되돌려라. 주변 배경의 수축/굴곡된 픽셀을 보정하라.")
+            if "다리" in str(body_zones) or "하체" in str(body_zones):
+                restore_parts.append("- 다리/하체: 길어진 다리 비율을 실제 신체 비율로 되돌려라.")
+            if "얼굴" in str(body_zones):
+                restore_parts.append("- 얼굴: 작아진 얼굴, 갸름해진 턱선, 커진 눈을 자연스러운 비율로 복원하라.")
+            if "상체" in str(body_zones) or "어깨" in str(body_zones):
+                restore_parts.append("- 어깨/상체: 넓혀진 어깨나 변형된 상체 실루엣을 보정하라.")
+            if skin_score > 0.3:
+                restore_parts.append("- 피부: 과도하게 스무딩된 피부에 자연스러운 모공·피부결 텍스처를 복원하라.")
+            body_restore_instructions = "\n".join(restore_parts)
+
+        prompt = f"""당신은 디지털 포렌식 전문가이자 이미지 복원 전문가입니다. 첨부된 이미지를 분석하고 반드시 JSON 형식으로만 응답하세요.
 
 자동 포렌식 분석 결과:
 - 종합 조작 가능성: {overall_score}/100
@@ -154,11 +185,23 @@ def gemini_vision_analysis(img_pil: Image.Image, forensics_result: dict) -> dict
 - Copy-Move 감지: {copy_move_desc}
 - 메타데이터 경고: {', '.join(meta_flags) if meta_flags else '없음'}
 
+신체 조작 탐지 결과 (SNOW/FaceTune/BeautyPlus 전용):
+- 신체 조작 점수: {body_score:.2f}/1.0
+- 감지된 조작 부위: {', '.join(body_zones) if body_zones else '없음'}
+- Mesh Warp 감지: {warp_desc}
+- 피부 스무딩 감지: {skin_desc}
+- 상세 조작 흔적: {body_hints}
+
+원본 복원 지침 (탐지된 조작을 역방향으로 적용):
+{body_restore_instructions if body_restore_instructions else "- 전반적인 자연스러운 원본 상태 추정"}
+
 이미지를 직접 시각 분석하여 아래 JSON만 반환하세요:
 {{
-  "visual_analysis": "이미지에서 시각적으로 관찰되는 조작 흔적 상세 설명",
-  "manipulation_details": ["구체적 조작 항목1", "항목2"],
-  "original_estimation": "조작 전 원본 이미지 추정 설명",
+  "visual_analysis": "이미지에서 시각적으로 관찰되는 조작 흔적 상세 설명 (신체 부위별: 허리, 다리, 얼굴, 눈, 피부결 등)",
+  "manipulation_details": ["구체적 조작 항목1 (예: 허리 약 15% 슬리밍 흔적)", "항목2"],
+  "body_manipulation_summary": "신체 조작 부위 요약 및 추정 변형 강도",
+  "original_estimation": "조작 전 원본 이미지 추정 설명 (각 부위별 원래 상태)",
+  "restoration_approach": "각 조작을 역방향으로 복원하는 구체적 방법론",
   "confidence": "high 또는 medium 또는 low"
 }}"""
 
@@ -176,7 +219,6 @@ def gemini_vision_analysis(img_pil: Image.Image, forensics_result: dict) -> dict
         )
 
         text = response.text.strip()
-        # JSON 블록만 추출 (```json ... ``` 포함 대응)
         if "```" in text:
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -188,8 +230,8 @@ def gemini_vision_analysis(img_pil: Image.Image, forensics_result: dict) -> dict
 
         analysis_json = json.loads(text)
 
-        # 필수 키 보정
-        for key in ["visual_analysis", "manipulation_details", "original_estimation", "confidence"]:
+        for key in ["visual_analysis", "manipulation_details", "body_manipulation_summary",
+                    "original_estimation", "restoration_approach", "confidence"]:
             if key not in analysis_json:
                 analysis_json[key] = [] if key == "manipulation_details" else ""
 

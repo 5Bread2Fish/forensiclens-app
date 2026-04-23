@@ -276,3 +276,11 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:
 .history-ts{font-size:10px;color:var(--muted);white-space:nowrap}
 
 @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+
+/* BODY MANIPULATION TAB */
+.body-score-wrap{margin:12px 0}
+.body-zones{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.body-detail-table{display:flex;flex-direction:column;gap:8px;margin-top:16px}
+.body-detail-row{display:grid;grid-template-columns:180px 80px 1fr;gap:12px;align-items:center;padding:10px 14px;background:var(--bg3);border-radius:8px;font-size:13px}
+.score-breakdown-item{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px}
+.score-breakdown-item:last-child{border-bottom:none}

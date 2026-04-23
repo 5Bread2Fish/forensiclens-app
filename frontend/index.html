@@ -235,6 +235,7 @@
         <button class="tab-btn" data-tab="copymove">🔗 Copy-Move</button>
         <button class="tab-btn" data-tab="fft">🌊 FFT</button>
         <button class="tab-btn" data-tab="stretch">↔ 왜곡</button>
+        <button class="tab-btn" data-tab="body">🩻 신체조작</button>
         <button class="tab-btn" data-tab="meta">📋 메타데이터</button>
         <button class="tab-btn" data-tab="refs">📚 근거 논문</button>
       </div>
@@ -306,6 +307,18 @@
         <div class="image-grid two-col">
           <div class="image-card"><div class="image-card-label">왜곡 히트맵</div><img id="stretchHeatmap" src="" alt="왜곡 히트맵" /></div>
           <div class="image-card"><div class="image-card-label">오버레이</div><img id="stretchOverlay" src="" alt="왜곡 오버레이" /></div>
+        </div>
+      </div>
+
+      <!-- BODY MANIPULATION TAB — dynamically populated by JS -->
+      <div class="tab-panel" id="tab-body">
+        <div class="panel-header">
+          <h3>🩻 신체 조작 탐지 (SNOW / FaceTune / BeautyPlus)</h3>
+          <div class="ref-pill">Mahdian &amp; Saic IEEE TIFS 2008 · Kirchner &amp; Fridrich SPIE 2010</div>
+          <p>허리·다리 슬리밍, 얼굴 소형화, 눈 확대, 피부 스무딩 등 모바일 뷰티 앱 조작을 탐지합니다.<br/>분석 후 자동으로 채워집니다.</p>
+        </div>
+        <div style="color:var(--muted);text-align:center;padding:40px;font-size:13px">
+          📸 이미지를 업로드하고 분석하면 신체 조작 탐지 결과가 여기에 표시됩니다
         </div>
       </div>
 
