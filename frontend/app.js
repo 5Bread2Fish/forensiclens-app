@@ -204,7 +204,7 @@ function handleFile(file) {
 }
 
 resetBtn.addEventListener('click', () => {
-  state = { file: null, forensicsResult: null, restorationResult: null };
+  state = { file: null, forensicsResult: null, restorationResult: null, consentGiven: !!sessionStorage.getItem('forensiclens_consent_v1') };
   uploadCard.style.display = 'block';
   previewCard.style.display = 'none';
   resultsSection.style.display = 'none';
@@ -246,6 +246,10 @@ function stopLoadingSteps() {
 // ── Analyze ────────────────────────────────────────────
 analyzeBtn.addEventListener('click', async () => {
   if (!state.file) return;
+
+  // 에러 배너 초기화
+  hideErrorBanner();
+
   loadingOverlay.style.display = 'flex';
   analyzeBtn.disabled = true;
   startLoadingSteps();
@@ -258,11 +262,17 @@ analyzeBtn.addEventListener('click', async () => {
     const data = await res.json();
 
     stopLoadingSteps();
-    loadingOverlay.style.display = 'none';  // 분석 완료 즉시 오버레이 닫기
+    loadingOverlay.style.display = 'none';
     analyzeBtn.disabled = false;
 
     if (!data.success) {
-      alert('분석 오류: ' + (data.error || '알 수 없는 오류'));
+      const msg = data.error || '알 수 없는 오류';
+      // Rate limit 특별 처리
+      if (res.status === 429) {
+        showErrorBanner(`⏱ 요청이 너무 많습니다. ${data.retry_after || 60}초 후 다시 시도해주세요.`);
+      } else {
+        showErrorBanner('분석 오류: ' + msg);
+      }
       return;
     }
 
@@ -279,9 +289,33 @@ analyzeBtn.addEventListener('click', async () => {
     stopLoadingSteps();
     loadingOverlay.style.display = 'none';
     analyzeBtn.disabled = false;
-    alert('서버 연결 오류: ' + err.message);
+    if (err.name === 'TypeError' && err.message.includes('fetch')) {
+      showErrorBanner('🔌 서버에 연결할 수 없습니다. 백엔드 서버가 실행 중인지 확인하세요.');
+    } else {
+      showErrorBanner('오류: ' + err.message);
+    }
   }
 });
+
+// ── Error Toast / Banner ────────────────────────────────
+function showErrorBanner(msg) {
+  let banner = document.getElementById('errorBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'errorBanner';
+    banner.style.cssText = 'position:fixed;top:72px;left:50%;transform:translateX(-50%);z-index:900;background:rgba(239,68,68,.95);color:#fff;padding:14px 24px;border-radius:12px;font-size:14px;font-weight:500;max-width:500px;text-align:center;box-shadow:0 8px 30px rgba(0,0,0,.4);backdrop-filter:blur(10px);animation:fadeUp .2s ease';
+    document.body.appendChild(banner);
+  }
+  banner.textContent = msg;
+  banner.style.display = 'block';
+  // 8초 후 자동 숨김
+  clearTimeout(banner._timeout);
+  banner._timeout = setTimeout(() => hideErrorBanner(), 8000);
+}
+function hideErrorBanner() {
+  const b = document.getElementById('errorBanner');
+  if (b) b.style.display = 'none';
+}
 
 
 // ── Render Results ─────────────────────────────────────
@@ -371,11 +405,9 @@ function stripB64Fields(obj) {
 async function runRestore() {
   if (!state.file || !state.forensicsResult) return;
 
-  // 자동 실행: restore 섹션 표시
   const restoreSec = document.getElementById('restoreSection');
   if (restoreSec) restoreSec.style.display = 'block';
 
-  // Show video section loading
   document.getElementById('videoSection').style.display = 'block';
   document.getElementById('videoLoading').style.display = 'flex';
   document.getElementById('transitionGif').style.display = 'none';
@@ -398,17 +430,25 @@ async function runRestore() {
     if (restoreBtn) restoreBtn.disabled = false;
     if (restoreBtnCta) restoreBtnCta.disabled = false;
 
-    if (!data.success) { alert('복원 오류: ' + (data.error || '')); return; }
+    if (!data.success) {
+      // 복원 실패 시 패널3에 오류 표시 (alert 대신)
+      const placeholder = document.getElementById('panelRestorePlaceholder');
+      if (placeholder) placeholder.innerHTML = `<div style="color:var(--warn);font-size:13px;padding:20px;text-align:center">⚠️ ${data.error || '복원 실패'}</div>`;
+      document.getElementById('videoSection').style.display = 'none';
+      return;
+    }
 
     state.restorationResult = data.restoration;
     renderRestoration(data.restoration);
   } catch (err) {
-    stopLoadingSteps();
-    loadingOverlay.style.display = 'none';
     document.getElementById('restoreLoading').style.display = 'none';
     if (restoreBtn) restoreBtn.disabled = false;
     if (restoreBtnCta) restoreBtnCta.disabled = false;
+    document.getElementById('videoSection').style.display = 'none';
     console.error('복원 오류:', err.message);
+    // 패널3에 조용히 오류 표시
+    const placeholder = document.getElementById('panelRestorePlaceholder');
+    if (placeholder) placeholder.innerHTML = `<div style="color:var(--muted);font-size:12px;padding:20px;text-align:center">복원 서버 연결 오류</div>`;
   }
 }
 
@@ -576,6 +616,67 @@ function renderTabs(f) {
         const c = s > 60 ? '#EF4444' : s > 30 ? '#F59E0B' : '#10B981';
         return `<div class="body-detail-row"><span>${zc.label}</span><span style="color:${c};font-weight:700">${s}/100</span><span style="color:var(--muted);font-size:12px">${det.description||''}</span></div>`;
       }).join('')}</div>
+    `;
+  }
+
+  // AI Generation Detection Tab
+  const ag = f.ai_generation || {};
+  const agOverall = ag.overall || {};
+  const aigenTab = document.getElementById('tab-aigen');
+  if (aigenTab) {
+    const agScore = (agOverall.score || 0) * 100;
+    const agLevel = agOverall.level || 'LOW';
+    const agColor = agLevel === 'HIGH' ? '#EF4444' : agLevel === 'MEDIUM' ? '#F59E0B' : '#10B981';
+    const verdict = agOverall.verdict || '분석 중...';
+    const aiType = agOverall.estimated_ai_type;
+
+    const detectors = [
+      { key: 'spectral',   label: '📡 GAN 스펙트럼 아티팩트', ref: 'Frank et al. ICML 2020' },
+      { key: 'prnu',       label: '📷 PRNU 카메라 노이즈 부재', ref: 'Lukas et al. IEEE TIFS 2006' },
+      { key: 'dct',        label: '🔢 DCT 고주파 분포', ref: 'Durall et al. CVPR 2020' },
+      { key: 'color_corr', label: '🎨 채널간 상관도', ref: 'Gragnaniello et al. ICME 2021' },
+      { key: 'texture',    label: '🧵 텍스처 균일도', ref: 'Wang et al. CVPR 2020' },
+    ];
+
+    aigenTab.innerHTML = `
+      <div class="panel-header">
+        <h3>🤖 AI 생성 이미지 탐지</h3>
+        <div class="ref-pill">Frank et al. ICML 2020 · Durall et al. CVPR 2020 · Lukas et al. IEEE TIFS 2006</div>
+        <p>Midjourney, DALL-E 3, Stable Diffusion, Adobe Firefly 등으로 생성된 이미지를 탐지합니다.</p>
+      </div>
+      <div style="background:var(--bg3);border-radius:14px;padding:20px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px">
+          <div style="font-size:36px;font-weight:800;color:${agColor}">${agScore.toFixed(0)}<span style="font-size:14px;font-weight:400;color:var(--muted)">/100</span></div>
+          <div>
+            <div style="font-size:16px;font-weight:700;color:${agColor}">${agLevel}</div>
+            <div style="font-size:13px;color:var(--text);margin-top:3px">${verdict}</div>
+            ${aiType ? `<div style="margin-top:6px;padding:4px 10px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);border-radius:6px;font-size:12px;color:#EF4444;display:inline-block">추정 툴: ${aiType}</div>` : ''}
+          </div>
+        </div>
+        <div style="height:8px;background:var(--bg2);border-radius:4px;overflow:hidden">
+          <div style="height:100%;width:${Math.min(agScore,100)}%;background:linear-gradient(90deg,${agColor}88,${agColor});border-radius:4px;transition:.5s"></div>
+        </div>
+      </div>
+      ${ag.spectral?.heatmap_b64 ? `
+      <div class="image-grid two-col" style="margin-bottom:16px">
+        <div class="image-card"><div class="image-card-label">📡 FFT 스펙트럼 (GAN 아티팩트)</div><img src="data:image/jpg;base64,${ag.spectral.heatmap_b64}" /></div>
+      </div>` : ''}
+      <div class="body-detail-table">
+        ${detectors.map(d => {
+          const det = ag[d.key] || {};
+          const s = ((det.score || 0)*100).toFixed(0);
+          const c = s > 60 ? '#EF4444' : s > 30 ? '#F59E0B' : '#10B981';
+          return `<div class="body-detail-row">
+            <span>${d.label}<br/><span style="font-size:10px;color:var(--muted)">${d.ref}</span></span>
+            <span style="color:${c};font-weight:700">${s}/100</span>
+            <span style="color:var(--muted);font-size:12px">${det.description||''}</span>
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="margin-top:16px;padding:12px;background:rgba(99,102,241,.08);border-radius:10px;font-size:12px;color:var(--muted)">
+        ⚠️ AI 생성 탐지는 통계적 분석이므로 100% 정확하지 않습니다. 여러 지표를 종합적으로 판단하세요.<br/>
+        특히 AI 이미지를 후처리(압축, 크기 조정)한 경우 탐지율이 낮아질 수 있습니다.
+      </div>
     `;
   }
 

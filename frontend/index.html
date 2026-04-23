@@ -236,6 +236,7 @@
         <button class="tab-btn" data-tab="fft">🌊 FFT</button>
         <button class="tab-btn" data-tab="stretch">↔ 왜곡</button>
         <button class="tab-btn" data-tab="body">🩻 신체조작</button>
+        <button class="tab-btn" data-tab="aigen">🤖 AI생성탐지</button>
         <button class="tab-btn" data-tab="meta">📋 메타데이터</button>
         <button class="tab-btn" data-tab="refs">📚 근거 논문</button>
       </div>
@@ -319,6 +320,18 @@
         </div>
         <div style="color:var(--muted);text-align:center;padding:40px;font-size:13px">
           📸 이미지를 업로드하고 분석하면 신체 조작 탐지 결과가 여기에 표시됩니다
+        </div>
+      </div>
+
+      <!-- AI GENERATION DETECTION TAB -->
+      <div class="tab-panel" id="tab-aigen">
+        <div class="panel-header">
+          <h3>🤖 AI 생성 이미지 탐지 (Midjourney / DALL-E / Stable Diffusion)</h3>
+          <div class="ref-pill">Frank et al. ICML 2020 · Durall et al. CVPR 2020 · Lukas et al. IEEE TIFS 2006</div>
+          <p>GAN/Diffusion 모델로 생성된 이미지를 주파수 분석, PRNU 부재, DCT 통계 등 5가지 알고리즘으로 탐지합니다.</p>
+        </div>
+        <div style="color:var(--muted);text-align:center;padding:40px;font-size:13px">
+          📸 이미지를 업로드하고 분석하면 AI 생성 탐지 결과가 여기에 표시됩니다
         </div>
       </div>
 

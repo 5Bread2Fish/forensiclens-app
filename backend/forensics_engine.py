@@ -30,6 +30,19 @@ def _get_body_detector():
             import body_manipulation_detector as _body_detector
     return _body_detector
 
+# AI generation detector
+_ai_gen_detector = None
+def _get_ai_gen_detector():
+    global _ai_gen_detector
+    if _ai_gen_detector is None:
+        try:
+            import ai_generation_detector as _ai_gen_detector
+        except ImportError:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(__file__))
+            import ai_generation_detector as _ai_gen_detector
+    return _ai_gen_detector
+
 
 def pil_to_base64(img: Image.Image, fmt="PNG") -> str:
     buf = io.BytesIO()
@@ -737,8 +750,16 @@ def run_full_analysis(image_bytes: bytes) -> dict:
         body = {'overall': {'score': 0.0, 'level': 'LOW', 'suspicious_zones': [],
                             'manipulation_hints': f'분석 오류: {e}'}}
 
+    # AI generation detector (Midjourney/DALL-E/SD)
+    try:
+        ag = _get_ai_gen_detector()
+        ai_gen = ag.run_ai_generation_analysis(img_pil)
+    except Exception as e:
+        ai_gen = {'overall': {'score': 0.0, 'level': 'LOW',
+                              'verdict': f'분석 오류: {e}', 'estimated_ai_type': None}}
+
     overall   = compute_overall_score_v2(ela, noise, copy_move, fft, stretch,
-                                        srm, jpeg_blk, multi_ela, body)
+                                        srm, jpeg_blk, multi_ela, body, ai_gen)
 
     # Composite overlay for three-panel comparison (middle panel)
     composite_b64 = build_composite_overlay(img_pil, ela, noise, stretch, copy_move, overall)
@@ -756,6 +777,7 @@ def run_full_analysis(image_bytes: bytes) -> dict:
         "jpeg_block":            jpeg_blk,
         "multi_ela":             multi_ela,
         "body_manipulation":     body,
+        "ai_generation":         ai_gen,
         "metadata":              meta,
         "composite_overlay_b64": composite_b64,
         "image_size":            list(img_pil.size),
@@ -967,22 +989,23 @@ def multi_quality_ela(img_pil: Image.Image) -> dict:
 
 # ── Updated Overall Score (v2) ─────────────────────────────────────────────────
 def compute_overall_score_v2(
-    ela, noise, copy_move, fft, stretch, srm, jpeg_blk, multi_ela, body=None
+    ela, noise, copy_move, fft, stretch, srm, jpeg_blk, multi_ela,
+    body=None, ai_gen=None
 ) -> dict:
     """
-    Scoring with body manipulation detector integrated.
+    Scoring: Photo manipulation + Body manipulation + AI generation.
     Weights:
-      JPEG Block  35%  (most discriminating for splicing)
-      Multi-ELA   18%  (compression history)
-      SRM         18%  (camera noise fingerprint)
-      Body Warp   15%  (SNOW/FaceTune mesh warp, skin smooth)
+      JPEG Block  30%  (most discriminating for splicing)
+      Multi-ELA   16%  (compression history)
+      SRM         16%  (camera noise fingerprint)
+      Body Warp   14%  (SNOW/FaceTune mesh warp)
+      AI Gen      10%  (Midjourney/SD/DALL-E detection)
       Copy-Move    8%  (RANSAC-verified)
       ELA          4%  (single-quality)
-      Noise        2%  (noisy on web images)
+      Noise        2%  (low weight — noisy on web images)
     """
     refs = SCIENTIFIC_REFS
 
-    # Calibrated sub-scores
     mela_cal = min(multi_ela.get("score", 0) / 1.0, 1.0)
     srm_cal  = min(srm.get("score", 0) / 1.0, 1.0)
     ns_cal   = min(noise.get("score", 0) / 0.8, 1.0)
@@ -991,33 +1014,48 @@ def compute_overall_score_v2(
     cm_cal   = min(copy_move.get("score", 0) / 1.0, 1.0)
     fft_cal  = min(fft.get("score", 0) / 1.0, 1.0)
 
-    # Body manipulation score
     body_cal = 0.0
     if body and isinstance(body, dict):
-        body_overall = body.get('overall', {})
-        body_cal = min(float(body_overall.get('score', 0.0)), 1.0)
+        body_cal = min(float(body.get('overall', {}).get('score', 0.0)), 1.0)
+
+    ai_cal = 0.0
+    if ai_gen and isinstance(ai_gen, dict):
+        ai_cal = min(float(ai_gen.get('overall', {}).get('score', 0.0)), 1.0)
 
     weighted = (
-        jb_cal   * 0.35 +
-        mela_cal * 0.18 +
-        srm_cal  * 0.18 +
-        body_cal * 0.15 +   # NEW: SNOW/FaceTune body warp detection
+        jb_cal   * 0.30 +
+        mela_cal * 0.16 +
+        srm_cal  * 0.16 +
+        body_cal * 0.14 +
+        ai_cal   * 0.10 +  # AI generation detection
         cm_cal   * 0.08 +
         ela_cal  * 0.04 +
         ns_cal   * 0.02
     )
 
-    # Bayesian posterior with SNS prior = 35%
     prior = 0.35
     posterior = (weighted * prior) / (weighted * prior + (1 - weighted) * (1 - prior) + 1e-9)
     normalized = round(min(posterior * 100, 100), 1)
 
+    # Special case: if AI generation is HIGH, override label
+    ai_level = ai_gen.get('overall', {}).get('level', 'LOW') if ai_gen else 'LOW'
+    ai_verdict = ai_gen.get('overall', {}).get('verdict', '') if ai_gen else ''
+
     if normalized >= 65:
-        level, label, color = "HIGH", "높음 — 조작 강하게 의심", "#EF4444"
+        level, color = "HIGH", "#EF4444"
+        if ai_level == 'HIGH':
+            label = f"높음 — AI 생성 이미지 강하게 의심 ({ai_verdict})"
+        else:
+            label = "높음 — 조작 강하게 의심"
     elif normalized >= 35:
-        level, label, color = "MEDIUM", "중간 — 조작 가능성 있음", "#F59E0B"
+        level, color = "MEDIUM", "#F59E0B"
+        if ai_level in ('HIGH', 'MEDIUM'):
+            label = f"중간 — AI 생성 또는 조작 가능성 ({ai_verdict})"
+        else:
+            label = "중간 — 조작 가능성 있음"
     else:
-        level, label, color = "LOW", "낮음 — 원본일 가능성 높음", "#10B981"
+        level, color = "LOW", "#10B981"
+        label = "낮음 — 원본일 가능성 높음"
 
     return {
         "score": normalized,
@@ -1025,14 +1063,15 @@ def compute_overall_score_v2(
         "label": label,
         "color": color,
         "breakdown": {
-            "multi_ela":       round(mela_cal * 100, 1),
-            "srm":             round(srm_cal * 100, 1),
-            "noise":           round(ns_cal * 100, 1),
-            "jpeg_block":      round(jb_cal * 100, 1),
-            "ela":             round(ela_cal * 100, 1),
-            "copy_move":       round(cm_cal * 100, 1),
-            "fft":             round(fft_cal * 100, 1),
-            "body_warp":       round(body_cal * 100, 1),
+            "multi_ela":   round(mela_cal * 100, 1),
+            "srm":         round(srm_cal * 100, 1),
+            "noise":       round(ns_cal * 100, 1),
+            "jpeg_block":  round(jb_cal * 100, 1),
+            "ela":         round(ela_cal * 100, 1),
+            "copy_move":   round(cm_cal * 100, 1),
+            "fft":         round(fft_cal * 100, 1),
+            "body_warp":   round(body_cal * 100, 1),
+            "ai_gen":      round(ai_cal * 100, 1),
         },
         "references": refs,
     }
