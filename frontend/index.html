@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ko" id="htmlRoot">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ForensicLens – AI 이미지 조작 탐지기</title>
+  <meta name="description" content="ELA·노이즈·Copy-Move·FFT 포렌식으로 SNS 인물 사진 조작을 탐지하고 원본을 추정합니다." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ── CONSENT MODAL ─────────────────────────────── -->
+<div class="consent-overlay" id="consentOverlay">
+  <div class="consent-modal">
+    <div class="consent-header">
+      <span class="consent-icon">🔒</span>
+      <h2 id="consentTitleEl">개인정보 처리 동의</h2>
+    </div>
+    <p class="consent-body" id="consentBodyEl">
+      업로드하신 이미지는 포렌식 분석 목적으로만 일시적으로 처리되며 서버에 영구 저장되지 않습니다.
+    </p>
+    <div class="consent-badges">
+      <span class="consent-badge">🇪🇺 GDPR</span>
+      <span class="consent-badge">🇺🇸 CCPA</span>
+      <span class="consent-badge">🇰🇷 개인정보보호법</span>
+    </div>
+    <div class="consent-checks">
+      <label class="consent-check">
+        <input type="checkbox" id="check1" />
+        <span id="consent1El">이미지가 분석 목적으로만 처리되며 서버에 저장되지 않음에 동의합니다. (필수)</span>
+      </label>
+      <label class="consent-check">
+        <input type="checkbox" id="check2" />
+        <span id="consent2El">본인이 업로드 권한을 가진 이미지임을 확인하며, 타인의 초상권을 침해하지 않음에 동의합니다. (필수)</span>
+      </label>
+      <label class="consent-check">
+        <input type="checkbox" id="check3" />
+        <span id="consent3El">만 14세 이상이며, 해당 분석 서비스 이용에 동의합니다. (필수)</span>
+      </label>
+    </div>
+    <div class="consent-actions">
+      <button class="btn-consent-accept" id="consentAcceptBtn" disabled>동의하고 분석 시작</button>
+      <button class="btn-consent-decline" id="consentDeclineBtn">취소</button>
+    </div>
+    <p class="consent-footer-note" id="consentGDPREl">EU GDPR · 캘리포니아 CCPA · 한국 개인정보보호법 준수</p>
+  </div>
+</div>
+
+<!-- HEADER -->
+<header class="header">
+  <div class="header-inner">
+    <div class="logo">
+      <span class="logo-icon">🔍</span>
+      <span class="logo-text">Forensic<span class="logo-accent">Lens</span></span>
+    </div>
+    <div class="header-right">
+      <button class="btn-history-toggle" id="historyToggleBtn" title="분석 기록">📁 기록</button>
+      <div class="header-badge" id="apiStatusBadge">
+        <span class="badge-dot"></span>
+        <span class="badge-text">로딩 중...</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- HISTORY PANEL -->
+<div class="history-panel" id="historyPanel" style="display:none">
+  <div class="history-header">
+    <h3 id="historyTitle">📁 분석 기록</h3>
+    <button class="btn-history-clear" id="historyClearBtn">기록 삭제</button>
+    <button class="btn-history-close" id="historyCloseBtn">✕</button>
+  </div>
+  <div class="history-list" id="historyList">
+    <div class="history-empty" id="historyEmpty">아직 분석 기록이 없습니다</div>
+  </div>
+</div>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-bg">
+    <div class="hero-orb orb-1"></div>
+    <div class="hero-orb orb-2"></div>
+    <div class="hero-orb orb-3"></div>
+  </div>
+  <div class="hero-content">
+    <div class="hero-eyebrow">AI 포렌식 탐지 엔진 v2.0 · Gemini 2.5 Flash</div>
+    <h1 class="hero-title">사진 조작,<br/><span class="gradient-text">AI가 전부 봅니다</span></h1>
+    <p class="hero-sub">ELA · 노이즈 · Copy-Move · FFT · EXIF 썸네일 복원으로 조작 흔적을 찾고<br/>Gemini Vision이 원본을 추정합니다. 모든 점수는 논문 근거 기반.</p>
+    <div class="hero-chips">
+      <span class="chip">ELA (Krawetz 2007)</span>
+      <span class="chip">노이즈 (Pan &amp; Lyu 2010)</span>
+      <span class="chip">Copy-Move (Christlein 2012)</span>
+      <span class="chip">FFT Ghost (Farid 2009)</span>
+      <span class="chip">EXIF 썸네일 복원</span>
+      <span class="chip">트랜지션 영상</span>
+    </div>
+  </div>
+</section>
+
+<!-- UPLOAD -->
+<section class="upload-section">
+  <div class="container">
+    <div class="upload-card" id="uploadCard">
+      <div class="upload-zone" id="uploadZone">
+        <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,image/bmp" hidden />
+        <div class="upload-icon-wrap"><div class="upload-icon">📷</div></div>
+        <h3 class="upload-title">사진을 드래그하거나 클릭하여 업로드</h3>
+        <p class="upload-sub">JPG · PNG · WEBP · BMP / 최대 20MB</p>
+        <button class="btn-upload" onclick="document.getElementById('fileInput').click()">사진 선택하기</button>
+      </div>
+    </div>
+    <div class="preview-card" id="previewCard" style="display:none">
+      <div class="preview-header">
+        <span class="preview-label">업로드된 이미지</span>
+        <button class="btn-reset" id="resetBtn">✕ 다시 선택</button>
+      </div>
+      <div class="preview-image-wrap"><img id="previewImg" src="" alt="업로드된 사진" /></div>
+      <button class="btn-analyze" id="analyzeBtn"><span class="btn-icon">🔬</span> 포렌식 분석 시작</button>
+    </div>
+  </div>
+</section>
+
+<!-- LOADING -->
+<div class="loading-overlay" id="loadingOverlay" style="display:none">
+  <div class="loading-card">
+    <div class="loading-spinner"></div>
+    <div class="loading-title">포렌식 분석 + AI 원본 추정 중...</div>
+    <div class="loading-steps" id="loadingSteps">
+      <div class="loading-step" data-step="0">ELA 오류 레벨 분석</div>
+      <div class="loading-step" data-step="1">노이즈 패턴 분석</div>
+      <div class="loading-step" data-step="2">Copy-Move 탐지 (SIFT+RANSAC)</div>
+      <div class="loading-step" data-step="3">FFT 스펙트럼 분석</div>
+      <div class="loading-step" data-step="4">EXIF 메타데이터 추출</div>
+      <div class="loading-step" data-step="5">복합 히트맵 생성</div>
+      <div class="loading-step" data-step="6">Gemini 2.5 Flash Vision 분석</div>
+      <div class="loading-step" data-step="7">트랜지션 영상 생성</div>
+    </div>
+  </div>
+</div>
+
+<!-- RESULTS -->
+<section class="results-section" id="resultsSection" style="display:none">
+  <div class="container">
+
+    <!-- Score -->
+    <div class="score-card" id="scoreCard">
+      <div class="score-left">
+        <div class="score-label">종합 조작 가능성 (베이지안 추론)</div>
+        <div class="score-value" id="scoreValue">0</div>
+        <div class="score-bar-wrap"><div class="score-bar" id="scoreBar"></div></div>
+        <div class="score-badge" id="scoreBadge">분석 중</div>
+        <div class="score-prior-note">사전 확률(Prior): SNS 사진 조작 기반율 35% 적용</div>
+      </div>
+      <div class="score-right">
+        <div class="score-breakdown" id="scoreBreakdown"></div>
+      </div>
+    </div>
+
+    <!-- THREE PANEL COMPARISON -->
+    <div class="three-panel-section">
+      <div class="section-title">
+        <h2>🖼 3패널 비교</h2>
+        <p>원본 · 조작 감지 복합 히트맵 · AI 추정 원본을 나란히 비교하세요</p>
+      </div>
+      <div class="three-panel-grid" id="threePanelGrid">
+        <div class="panel-col">
+          <div class="panel-badge badge-blue">① ORIGINAL</div>
+          <div class="panel-img-wrap">
+            <img id="panelOriginal" src="" alt="원본" />
+          </div>
+          <div class="panel-caption">업로드된 사진</div>
+        </div>
+        <div class="panel-col">
+          <div class="panel-badge badge-red">② MANIPULATION DETECTED</div>
+          <div class="panel-img-wrap">
+            <img id="panelComposite" src="" alt="조작 감지" />
+          </div>
+          <div class="panel-caption">복합 조작 히트맵 (ELA+노이즈+왜곡 가중합)</div>
+        </div>
+        <div class="panel-col panel-restore-col">
+          <div class="panel-badge badge-green">③ ESTIMATED ORIGINAL</div>
+          <div class="panel-img-wrap" id="panelRestoreWrap">
+            <div class="panel-restore-placeholder" id="panelRestorePlaceholder">
+              <div class="restore-cta">
+                <div class="loading-spinner small" style="margin:0 auto 12px"></div>
+                <p style="font-size:13px;color:var(--muted)">AI 원본 추정 중...<br/><small>Gemini 2.5 Flash Vision</small></p>
+              </div>
+            </div>
+            <img id="panelRestored" src="" alt="추정 원본" style="display:none" />
+          </div>
+          <div class="panel-caption" id="panelRestoredCaption">AI 분석 진행 중</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Before/After Slider -->
+    <div class="slider-section" id="sliderSection" style="display:none">
+      <div class="section-title">
+        <h2>◀▶ Before / After 슬라이더</h2>
+        <p>슬라이더를 드래그해 원본과 추정 원본을 비교하세요</p>
+      </div>
+      <div class="ba-container" id="baContainer">
+        <img class="ba-img ba-before" id="baOriginal" src="" alt="원본" />
+        <img class="ba-img ba-after"  id="baRestored" src="" alt="추정 원본" />
+        <div class="ba-divider" id="baDivider">
+          <div class="ba-handle">⇔</div>
+        </div>
+        <div class="ba-label ba-label-left">ORIGINAL</div>
+        <div class="ba-label ba-label-right">ESTIMATED</div>
+      </div>
+    </div>
+
+    <!-- Transition Video -->
+    <div class="video-section" id="videoSection" style="display:none">
+      <div class="section-title">
+        <h2>🎬 트랜지션 영상</h2>
+        <p>원본 → 조작 감지 → 추정 원본으로 변화하는 과정을 확인하세요</p>
+      </div>
+      <div class="video-wrap">
+        <div class="video-loading" id="videoLoading">
+          <div class="loading-spinner small"></div>
+          <span>트랜지션 영상 생성 중...</span>
+        </div>
+        <img id="transitionGif" src="" alt="트랜지션 영상" style="display:none" />
+      </div>
+    </div>
+
+    <!-- Analysis Tabs -->
+    <div class="tabs-container">
+      <div class="tabs-header">
+        <button class="tab-btn active" data-tab="ela">🔥 ELA</button>
+        <button class="tab-btn" data-tab="noise">📡 노이즈</button>
+        <button class="tab-btn" data-tab="copymove">🔗 Copy-Move</button>
+        <button class="tab-btn" data-tab="fft">🌊 FFT</button>
+        <button class="tab-btn" data-tab="stretch">↔ 왜곡</button>
+        <button class="tab-btn" data-tab="meta">📋 메타데이터</button>
+        <button class="tab-btn" data-tab="refs">📚 근거 논문</button>
+      </div>
+
+      <div class="tab-panel active" id="tab-ela">
+        <div class="panel-header">
+          <h3>🔥 ELA (Error Level Analysis)</h3>
+          <div class="ref-pill">Krawetz, BlackHat 2007</div>
+          <p>JPEG 재압축 시 오류 수준 차이를 분석합니다. 편집된 영역은 원본 대비 다른 압축 레벨을 보입니다.</p>
+        </div>
+        <div class="analysis-desc" id="elaDesc"></div>
+        <div class="image-grid three-col">
+          <div class="image-card"><div class="image-card-label">원본</div><img id="elaOriginal" src="" alt="원본" /></div>
+          <div class="image-card"><div class="image-card-label">ELA 히트맵</div><img id="elaHeatmap" src="" alt="ELA 히트맵" /></div>
+          <div class="image-card"><div class="image-card-label">오버레이</div><img id="elaOverlay" src="" alt="ELA 오버레이" /></div>
+        </div>
+        <div class="regions-list" id="elaRegions"></div>
+      </div>
+
+      <div class="tab-panel" id="tab-noise">
+        <div class="panel-header">
+          <h3>📡 노이즈 불일치 분석</h3>
+          <div class="ref-pill">Pan &amp; Lyu, IEEE TIFS 2010</div>
+          <p>영역별 노이즈 분산을 측정합니다. 합성·보정된 부위는 주변과 다른 노이즈 텍스처를 가집니다.</p>
+        </div>
+        <div class="analysis-desc" id="noiseDesc"></div>
+        <div class="image-grid two-col">
+          <div class="image-card"><div class="image-card-label">노이즈 히트맵</div><img id="noiseHeatmap" src="" alt="노이즈 히트맵" /></div>
+          <div class="image-card"><div class="image-card-label">오버레이</div><img id="noiseOverlay" src="" alt="노이즈 오버레이" /></div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-copymove">
+        <div class="panel-header">
+          <h3>🔗 Copy-Move 복사 감지</h3>
+          <div class="ref-pill">Christlein et al., IEEE TIFS 2012</div>
+          <p>이미지 내 복사·붙여넣기된 영역을 SIFT 특징점 매칭으로 탐지합니다.</p>
+        </div>
+        <div class="analysis-desc" id="copyMoveDesc"></div>
+        <div class="image-grid single-col">
+          <div class="image-card wide"><div class="image-card-label">SIFT 매칭 결과</div><img id="copyMoveOverlay" src="" alt="Copy-Move 결과" /></div>
+        </div>
+        <div class="copy-move-legend">
+          <span class="legend-item"><span class="dot green"></span> 소스 포인트</span>
+          <span class="legend-item"><span class="dot red"></span> 복사된 포인트</span>
+          <span class="legend-item"><span class="dot yellow"></span> 연결선</span>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-fft">
+        <div class="panel-header">
+          <h3>🌊 FFT Ghost 분석</h3>
+          <div class="ref-pill">Farid, IEEE Signal Processing Letters 2009</div>
+          <p>주파수 영역에서 이중 압축·리사이즈 흔적을 탐지합니다.</p>
+        </div>
+        <div class="analysis-desc" id="fftDesc"></div>
+        <div class="image-grid single-col">
+          <div class="image-card wide"><div class="image-card-label">FFT 주파수 스펙트럼</div><img id="fftHeatmap" src="" alt="FFT 스펙트럼" /></div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-stretch">
+        <div class="panel-header">
+          <h3>↔ 늘리기·왜곡 분석</h3>
+          <div class="ref-pill">Gallagher &amp; Chen, CRV 2005</div>
+          <p>그라디언트 방향 균일성으로 신체/배경 왜곡을 탐지합니다.</p>
+        </div>
+        <div class="analysis-desc" id="stretchDesc"></div>
+        <div class="image-grid two-col">
+          <div class="image-card"><div class="image-card-label">왜곡 히트맵</div><img id="stretchHeatmap" src="" alt="왜곡 히트맵" /></div>
+          <div class="image-card"><div class="image-card-label">오버레이</div><img id="stretchOverlay" src="" alt="왜곡 오버레이" /></div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-meta">
+        <div class="panel-header">
+          <h3>📋 EXIF 메타데이터 분석</h3>
+          <p>촬영 기기, 편집 소프트웨어, 시간 불일치, 내장 썸네일을 분석합니다.</p>
+        </div>
+        <div class="meta-flags" id="metaFlags"></div>
+        <div id="exifThumbSection" style="display:none" class="exif-thumb-section">
+          <h4>🖼 EXIF 내장 썸네일 복원</h4>
+          <p class="exif-thumb-note">편집 앱이 주 이미지는 수정했으나 EXIF 썸네일을 갱신하지 않은 경우, 원본 이미지 일부가 여기에 남아 있을 수 있습니다.</p>
+          <div class="image-grid two-col">
+            <div class="image-card"><div class="image-card-label">EXIF 내장 썸네일 (원본 추정)</div><img id="exifThumb" src="" alt="EXIF 썸네일" /></div>
+            <div class="image-card"><div class="image-card-label">현재 이미지 (동일 크기로 리사이즈)</div><img id="panelOriginalSmall" src="" alt="현재 이미지" /></div>
+          </div>
+          <div class="exif-mse-note" id="exifMseNote"></div>
+        </div>
+        <div class="meta-table-wrap">
+          <table class="meta-table">
+            <thead><tr><th>항목</th><th>값</th></tr></thead>
+            <tbody id="metaTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-refs">
+        <div class="panel-header">
+          <h3>📚 과학적 근거 논문</h3>
+          <p>ForensicLens의 모든 점수는 아래 피어리뷰 논문의 임계값·가중치를 기반으로 계산됩니다.</p>
+        </div>
+        <div class="refs-grid" id="refsGrid"></div>
+        <div class="scoring-formula">
+          <h4>📐 스코어링 공식</h4>
+          <pre class="formula-block">P(조작 | 증거) = 
+  [가중합 × Prior] / [가중합 × Prior + (1 - 가중합) × (1 - Prior)]
+
+가중합 = JPEG블록(40%) + 다중ELA(20%) + SRM(20%) + Copy-Move(10%) + 기타(10%)
+Prior  = 0.35  (SNS 사진 조작 기반율, Instagram survey 추정)</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI Restoration -->
+    <div class="restore-section" id="restoreSection" style="display:none">
+      <div class="restore-header">
+        <div class="restore-title-wrap">
+          <h2 class="restore-title">🤖 AI 원본 추정 진행 중</h2>
+          <p class="restore-sub">Gemini 2.5 Flash Vision이 이미지를 직접 분석하고 조작 전 원본을 추정합니다.</p>
+        </div>
+      </div>
+      <div class="restore-results" id="restoreResults" style="display:none">
+        <div class="restore-loading" id="restoreLoading" style="display:none">
+          <div class="loading-spinner small"></div>
+          <span>AI가 분석 중입니다 (10~30초)...</span>
+        </div>
+        <div class="restore-content" id="restoreContent" style="display:none">
+          <div id="mockNoticeWrap"></div>
+          <div class="analysis-text-card" id="analysisTextCard"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="info-bar" id="infoBar"></div>
+    <div class="new-analysis-wrap">
+      <button class="btn-new-analysis" id="newAnalysisBtn">🔄 새 사진 분석하기</button>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <p>🔍 ForensicLens v2.0 — AI 이미지 포렌식 분석 엔진</p>
+    <p class="footer-note">분석 결과는 참고용이며 법적 증거로 사용될 수 없습니다. 모든 점수는 논문 기반 알고리즘입니다.</p>
+    <p style="font-size:11px;color:var(--muted);margin-top:8px">
+      <a href="#" style="color:var(--muted)" id="privacyPolicyLink">개인정보 처리방침</a> ·
+      이미지는 서버에 저장되지 않습니다 · GDPR / CCPA / 개인정보보호법 준수
+    </p>
+  </div>
+</footer>
+
+<!-- Image Zoom Modal -->
+<div class="img-modal" id="imgModal"><img id="modalImg" src="" alt="확대" /></div>
+
+<script src="i18n.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
